@@ -150,6 +150,13 @@ static SECURITY_STATUS nla_decrypt_ts_credentials(rdpNla* nla);
 static BOOL nla_read_ts_password_creds(rdpNla* nla, wStream* s);
 static void nla_identity_free(SEC_WINNT_AUTH_IDENTITY* identity);
 
+static BOOL nla_Digest_Update_From_SecBuffer(WINPR_DIGEST_CTX* ctx, const SecBuffer* buffer)
+{
+	if (!buffer)
+		return FALSE;
+	return winpr_Digest_Update(ctx, buffer->pvBuffer, buffer->cbBuffer);
+}
+
 static BOOL nla_sec_buffer_alloc(SecBuffer* buffer, size_t size)
 {
 	sspi_SecBufferFree(buffer);
@@ -1381,11 +1388,11 @@ SECURITY_STATUS nla_encrypt_public_key_hash(rdpNla* nla)
 	if (!winpr_Digest_Update(sha256, hashMagic, hashSize))
 		goto out;
 
-	if (!winpr_Digest_Update(sha256, nla->ClientNonce.pvBuffer, nla->ClientNonce.cbBuffer))
+	if (!nla_Digest_Update_From_SecBuffer(sha256, &nla->ClientNonce))
 		goto out;
 
 	/* SubjectPublicKey */
-	if (!winpr_Digest_Update(sha256, nla->PublicKey.pvBuffer, nla->PublicKey.cbBuffer))
+	if (!nla_Digest_Update_From_SecBuffer(sha256, &nla->PublicKey))
 		goto out;
 
 	hash = &((BYTE*)nla->pubKeyAuth.pvBuffer)[nla->ContextSizes.cbSecurityTrailer];
@@ -1489,11 +1496,11 @@ SECURITY_STATUS nla_decrypt_public_key_hash(rdpNla* nla)
 	if (!winpr_Digest_Update(sha256, hashMagic, hashSize))
 		goto fail;
 
-	if (!winpr_Digest_Update(sha256, nla->ClientNonce.pvBuffer, nla->ClientNonce.cbBuffer))
+	if (!nla_Digest_Update_From_SecBuffer(sha256, &nla->ClientNonce))
 		goto fail;
 
 	/* SubjectPublicKey */
-	if (!winpr_Digest_Update(sha256, nla->PublicKey.pvBuffer, nla->PublicKey.cbBuffer))
+	if (!nla_Digest_Update_From_SecBuffer(sha256, &nla->PublicKey))
 		goto fail;
 
 	if (!winpr_Digest_Final(sha256, serverClientHash, sizeof(serverClientHash)))
