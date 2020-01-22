@@ -124,7 +124,7 @@ struct rdp_nla
 
 	/* Lifetime of buffer nla_new -> nla_free */
 	SecBuffer ClientNonce;
-	SecBuffer outputBuffer;
+
 	SecBuffer negoToken;
 	SecBuffer pubKeyAuth;
 	SecBuffer authInfo;
@@ -737,19 +737,21 @@ fail:
 
 int nla_client_begin(rdpNla* nla)
 {
+	int rc = -1;
+	SecBuffer outputBuffer = { 0 };
 	SecBufferDesc outputBufferDesc = { 0 };
 	if (nla_client_init(nla) < 1)
-		return -1;
+		goto fail;
 
 	if (nla_get_state(nla) != NLA_STATE_INITIAL)
-		return -1;
+		goto fail;
 
 	outputBufferDesc.ulVersion = SECBUFFER_VERSION;
 	outputBufferDesc.cBuffers = 1;
-	outputBufferDesc.pBuffers = &nla->outputBuffer;
+	outputBufferDesc.pBuffers = &outputBuffer;
 
-	if (!nla_sec_buffer_alloc(&nla->outputBuffer, nla->cbMaxToken))
-		return -1;
+	if (!nla_sec_buffer_alloc(&outputBuffer, nla->cbMaxToken))
+		goto fail;
 
 	nla->status = nla_initialize_security_context(nla, TRUE, NULL, &outputBufferDesc);
 	switch (nla->status)
@@ -781,9 +783,10 @@ int nla_client_begin(rdpNla* nla)
 			break;
 	}
 
+	rc = 1;
 fail:
-	sspi_SecBufferFree(&nla->outputBuffer);
-	return 1;
+	sspi_SecBufferFree(&outputBuffer);
+	return rc;
 }
 
 static int nla_client_recv_nego_token(rdpNla* nla)
@@ -791,6 +794,7 @@ static int nla_client_recv_nego_token(rdpNla* nla)
 	int rc = -1;
 	SECURITY_STATUS status;
 	SecBuffer inputBuffer = { 0 };
+	SecBuffer outputBuffer = { 0 };
 	SecBufferDesc inputBufferDesc = { 0 };
 	SecBufferDesc outputBufferDesc = { 0 };
 
@@ -802,8 +806,8 @@ static int nla_client_recv_nego_token(rdpNla* nla)
 
 	outputBufferDesc.ulVersion = SECBUFFER_VERSION;
 	outputBufferDesc.cBuffers = 1;
-	outputBufferDesc.pBuffers = &nla->outputBuffer;
-	if (!nla_sec_buffer_alloc(&nla->outputBuffer, nla->cbMaxToken))
+	outputBufferDesc.pBuffers = &outputBuffer;
+	if (!nla_sec_buffer_alloc(&outputBuffer, nla->cbMaxToken))
 		goto fail;
 
 	nla->status = nla_initialize_security_context(nla, FALSE, &inputBufferDesc, &outputBufferDesc);
@@ -855,7 +859,7 @@ static int nla_client_recv_nego_token(rdpNla* nla)
 	rc = 1;
 fail:
 	sspi_SecBufferFree(&inputBuffer);
-	sspi_SecBufferFree(&nla->outputBuffer);
+	sspi_SecBufferFree(&outputBuffer);
 	return rc;
 }
 
@@ -1060,6 +1064,7 @@ static int nla_server_authenticate(rdpNla* nla)
 	{
 		int rc = -1;
 		SecBuffer inputBuffer = { 0 };
+		SecBuffer outputBuffer = { 0 };
 		SecBufferDesc inputBufferDesc = { 0 };
 		SecBufferDesc outputBufferDesc = { 0 };
 
@@ -1080,9 +1085,9 @@ static int nla_server_authenticate(rdpNla* nla)
 
 		outputBufferDesc.ulVersion = SECBUFFER_VERSION;
 		outputBufferDesc.cBuffers = 1;
-		outputBufferDesc.pBuffers = &nla->outputBuffer;
+		outputBufferDesc.pBuffers = &outputBuffer;
 
-		if (!nla_sec_buffer_alloc(&nla->outputBuffer, nla->cbMaxToken))
+		if (!nla_sec_buffer_alloc(&outputBuffer, nla->cbMaxToken))
 			goto fail;
 
 		nla->status = nla->table->AcceptSecurityContext(
@@ -1092,7 +1097,7 @@ static int nla_server_authenticate(rdpNla* nla)
 		WLog_VRB(TAG, "AcceptSecurityContext status %s [0x%08" PRIX32 "]",
 		         GetSecurityStatusString(nla->status), nla->status);
 
-		if (!nla_sec_buffer_alloc_from_buffer(&nla->negoToken, &nla->outputBuffer, 0))
+		if (!nla_sec_buffer_alloc_from_buffer(&nla->negoToken, &outputBuffer, 0))
 			goto fail;
 
 		if ((nla->status == SEC_I_COMPLETE_AND_CONTINUE) || (nla->status == SEC_I_COMPLETE_NEEDED))
@@ -1132,7 +1137,7 @@ static int nla_server_authenticate(rdpNla* nla)
 
 		if (nla->status == SEC_E_OK)
 		{
-			if (nla->outputBuffer.cbBuffer != 0)
+			if (outputBuffer.cbBuffer != 0)
 			{
 				if (!nla_send(nla))
 				{
@@ -1178,6 +1183,7 @@ static int nla_server_authenticate(rdpNla* nla)
 			rc = 1;
 		fail:
 			sspi_SecBufferFree(&inputBuffer);
+			sspi_SecBufferFree(&outputBuffer);
 			if (rc < 0)
 				return rc;
 		}
@@ -2335,7 +2341,6 @@ void nla_free(rdpNla* nla)
 
 	nla_buffer_free(nla);
 	sspi_SecBufferFree(&nla->ClientNonce);
-	sspi_SecBufferFree(&nla->outputBuffer);
 	sspi_SecBufferFree(&nla->PublicKey);
 	sspi_SecBufferFree(&nla->tsCredentials);
 
