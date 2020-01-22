@@ -124,7 +124,6 @@ struct rdp_nla
 
 	/* Lifetime of buffer nla_new -> nla_free */
 	SecBuffer ClientNonce;
-	SecBuffer inputBuffer;
 	SecBuffer outputBuffer;
 	SecBuffer negoToken;
 	SecBuffer pubKeyAuth;
@@ -791,13 +790,14 @@ static int nla_client_recv_nego_token(rdpNla* nla)
 {
 	int rc = -1;
 	SECURITY_STATUS status;
+	SecBuffer inputBuffer = { 0 };
 	SecBufferDesc inputBufferDesc = { 0 };
 	SecBufferDesc outputBufferDesc = { 0 };
 
 	inputBufferDesc.ulVersion = SECBUFFER_VERSION;
 	inputBufferDesc.cBuffers = 1;
-	inputBufferDesc.pBuffers = &nla->inputBuffer;
-	if (!nla_sec_buffer_alloc_from_buffer(&nla->inputBuffer, &nla->negoToken, 0))
+	inputBufferDesc.pBuffers = &inputBuffer;
+	if (!nla_sec_buffer_alloc_from_buffer(&inputBuffer, &nla->negoToken, 0))
 		goto fail;
 
 	outputBufferDesc.ulVersion = SECBUFFER_VERSION;
@@ -854,7 +854,7 @@ static int nla_client_recv_nego_token(rdpNla* nla)
 
 	rc = 1;
 fail:
-	sspi_SecBufferFree(&nla->inputBuffer);
+	sspi_SecBufferFree(&inputBuffer);
 	sspi_SecBufferFree(&nla->outputBuffer);
 	return rc;
 }
@@ -1058,22 +1058,24 @@ static int nla_server_authenticate(rdpNla* nla)
 
 	while (TRUE)
 	{
+		int rc = -1;
+		SecBuffer inputBuffer = { 0 };
 		SecBufferDesc inputBufferDesc = { 0 };
 		SecBufferDesc outputBufferDesc = { 0 };
 
 		/* receive authentication token */
 		inputBufferDesc.ulVersion = SECBUFFER_VERSION;
 		inputBufferDesc.cBuffers = 1;
-		inputBufferDesc.pBuffers = &nla->inputBuffer;
+		inputBufferDesc.pBuffers = &inputBuffer;
 
 		if (nla_recv(nla) < 0)
-			return -1;
+			goto fail;
 
 		WLog_DBG(TAG, "Receiving Authentication Token");
-		if (!nla_sec_buffer_alloc_from_buffer(&nla->inputBuffer, &nla->negoToken, 0))
+		if (!nla_sec_buffer_alloc_from_buffer(&inputBuffer, &nla->negoToken, 0))
 		{
 			WLog_ERR(TAG, "CredSSP: invalid negoToken!");
-			return -1;
+			goto fail;
 		}
 
 		outputBufferDesc.ulVersion = SECBUFFER_VERSION;
@@ -1081,7 +1083,7 @@ static int nla_server_authenticate(rdpNla* nla)
 		outputBufferDesc.pBuffers = &nla->outputBuffer;
 
 		if (!nla_sec_buffer_alloc(&nla->outputBuffer, nla->cbMaxToken))
-			return -1;
+			goto fail;
 
 		nla->status = nla->table->AcceptSecurityContext(
 		    &nla->credentials, nla->haveContext ? &nla->context : NULL, &inputBufferDesc,
@@ -1091,7 +1093,7 @@ static int nla_server_authenticate(rdpNla* nla)
 		         GetSecurityStatusString(nla->status), nla->status);
 
 		if (!nla_sec_buffer_alloc_from_buffer(&nla->negoToken, &nla->outputBuffer, 0))
-			return -1;
+			goto fail;
 
 		if ((nla->status == SEC_I_COMPLETE_AND_CONTINUE) || (nla->status == SEC_I_COMPLETE_NEEDED))
 		{
@@ -1125,7 +1127,7 @@ static int nla_server_authenticate(rdpNla* nla)
 			}
 
 			if (!nla_complete_auth(nla, &outputBufferDesc))
-				return -1;
+				goto fail;
 		}
 
 		if (nla->status == SEC_E_OK)
@@ -1135,11 +1137,11 @@ static int nla_server_authenticate(rdpNla* nla)
 				if (!nla_send(nla))
 				{
 					nla_buffer_free(nla);
-					return -1;
+					goto fail;
 				}
 
 				if (nla_recv(nla) < 0)
-					return -1;
+					goto fail;
 
 				WLog_DBG(TAG, "Receiving pubkey Token");
 			}
@@ -1148,7 +1150,7 @@ static int nla_server_authenticate(rdpNla* nla)
 			nla->status = nla_query_context_sizes(nla);
 
 			if (nla->status != SEC_E_OK)
-				return -1;
+				goto fail;
 
 			if (nla->peerVersion < 5)
 				nla->status = nla_decrypt_public_key_echo(nla);
@@ -1160,7 +1162,7 @@ static int nla_server_authenticate(rdpNla* nla)
 				WLog_ERR(TAG,
 				         "Error: could not verify client's public key echo %s [0x%08" PRIX32 "]",
 				         GetSecurityStatusString(nla->status), nla->status);
-				return -1;
+				goto fail;
 			}
 
 			sspi_SecBufferFree(&nla->negoToken);
@@ -1171,7 +1173,13 @@ static int nla_server_authenticate(rdpNla* nla)
 				nla->status = nla_encrypt_public_key_hash(nla);
 
 			if (nla->status != SEC_E_OK)
-				return -1;
+				goto fail;
+
+			rc = 1;
+		fail:
+			sspi_SecBufferFree(&inputBuffer);
+			if (rc < 0)
+				return rc;
 		}
 
 		if ((nla->status != SEC_E_OK) && (nla->status != SEC_I_CONTINUE_NEEDED))
@@ -2327,7 +2335,6 @@ void nla_free(rdpNla* nla)
 
 	nla_buffer_free(nla);
 	sspi_SecBufferFree(&nla->ClientNonce);
-	sspi_SecBufferFree(&nla->inputBuffer);
 	sspi_SecBufferFree(&nla->outputBuffer);
 	sspi_SecBufferFree(&nla->PublicKey);
 	sspi_SecBufferFree(&nla->tsCredentials);
