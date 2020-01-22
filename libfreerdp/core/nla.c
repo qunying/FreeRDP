@@ -123,7 +123,8 @@ struct rdp_nla
 	TimeStamp expiration;
 
 	/* Lifetime of buffer nla_new -> nla_free */
-	SecBuffer ClientNonce;
+	SecBuffer ClientNonce; /* Depending on protocol version a random nonce or a value read from the
+	                          server. */
 
 	SecBuffer negoToken;
 	SecBuffer pubKeyAuth;
@@ -454,6 +455,12 @@ static size_t ber_write_sequence_octet_string(wStream* stream, BYTE context, con
 	size_t rc = ber_write_contextual_tag(stream, context, ber_sizeof_octet_string(length), TRUE);
 	rc += ber_write_octet_string(stream, value, length);
 	return rc;
+}
+
+static size_t ber_write_sequence_octet_string_from_secbuffer(wStream* stream, BYTE context,
+                                                             const SecBuffer* buffer)
+{
+	return ber_write_sequence_octet_string(stream, context, buffer->pvBuffer, buffer->cbBuffer);
 }
 
 /* CredSSP Client-To-Server Binding Hash\0 */
@@ -1872,8 +1879,8 @@ static BOOL nla_client_write_nego_token(wStream* s, const SecBuffer* negoToken)
 		                                  negoToken->cbBuffer))); /* SEQUENCE OF NegoDataItem */
 		length += ber_write_sequence_tag(
 		    s, ber_sizeof_sequence_octet_string(negoToken->cbBuffer)); /* NegoDataItem */
-		length += ber_write_sequence_octet_string(s, 0, (BYTE*)negoToken->pvBuffer,
-		                                          negoToken->cbBuffer); /* OCTET STRING */
+		length +=
+		    ber_write_sequence_octet_string_from_secbuffer(s, 0, negoToken); /* OCTET STRING */
 
 		if (length != nego_tokens_length)
 			return FALSE;
@@ -1933,7 +1940,7 @@ BOOL nla_send(rdpNla* nla)
 	if (auth_info_length > 0)
 	{
 		WLog_DBG(TAG, "   ----->> auth info");
-		if (ber_write_sequence_octet_string(s, 2, nla->authInfo.pvBuffer, nla->authInfo.cbBuffer) !=
+		if (ber_write_sequence_octet_string_from_secbuffer(s, 2, &nla->authInfo) !=
 		    auth_info_length)
 			goto fail;
 	}
@@ -1942,8 +1949,8 @@ BOOL nla_send(rdpNla* nla)
 	if (pub_key_auth_length > 0)
 	{
 		WLog_DBG(TAG, "   ----->> public key auth");
-		if (ber_write_sequence_octet_string(s, 3, nla->pubKeyAuth.pvBuffer,
-		                                    nla->pubKeyAuth.cbBuffer) != pub_key_auth_length)
+		if (ber_write_sequence_octet_string_from_secbuffer(s, 3, &nla->pubKeyAuth) !=
+		    pub_key_auth_length)
 			goto fail;
 	}
 
@@ -1961,8 +1968,8 @@ BOOL nla_send(rdpNla* nla)
 	if (client_nonce_length > 0)
 	{
 		WLog_DBG(TAG, "   ----->> client nonce");
-		if (ber_write_sequence_octet_string(s, 5, nla->ClientNonce.pvBuffer,
-		                                    nla->ClientNonce.cbBuffer) != client_nonce_length)
+		if (ber_write_sequence_octet_string_from_secbuffer(s, 5, &nla->ClientNonce) !=
+		    client_nonce_length)
 			goto fail;
 	}
 
