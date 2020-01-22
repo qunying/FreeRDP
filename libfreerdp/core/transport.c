@@ -222,6 +222,8 @@ BOOL transport_connect_nla(rdpTransport* transport)
 	if (!settings->Authentication)
 		return TRUE;
 
+	/* NLA might already have been initialized during a connection attempt. */
+	nla_free(rdp->nla);
 	rdp->nla = nla_new(instance, transport, settings);
 
 	if (!rdp->nla)
