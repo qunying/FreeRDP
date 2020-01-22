@@ -216,6 +216,7 @@ static BOOL nla_set_package_name(rdpNla* nla, const TCHAR* name)
 
 static SECURITY_STATUS nla_update_package_name(rdpNla* nla)
 {
+	BOOL rc;
 	SECURITY_STATUS status;
 	PSecPkgInfo pPackageInfo;
 
@@ -241,7 +242,7 @@ static SECURITY_STATUS nla_update_package_name(rdpNla* nla)
 	}
 
 	nla->cbMaxToken = pPackageInfo->cbMaxToken;
-	nla_set_package_name(nla, pPackageInfo->Name);
+	rc = nla_set_package_name(nla, pPackageInfo->Name);
 	status = nla->table->FreeContextBuffer(pPackageInfo);
 	if (status != SEC_E_OK)
 	{
@@ -249,6 +250,9 @@ static SECURITY_STATUS nla_update_package_name(rdpNla* nla)
 		         GetSecurityStatusString(status), status);
 		return status;
 	}
+	if (!rc)
+		return ERROR_WINS_INTERNAL;
+
 	return status;
 }
 
