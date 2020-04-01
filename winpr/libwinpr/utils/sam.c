@@ -76,7 +76,7 @@ WINPR_SAM* SamOpen(const char* filename, BOOL readOnly)
 	}
 	else
 	{
-		WLog_DBG(TAG, "Could not open SAM file!");
+		WLog_DBG(TAG, "Could not open SAM file %s!", filename);
 		return NULL;
 	}
 
@@ -156,45 +156,44 @@ static void HexStrToBin(char* str, BYTE* bin, int length)
 
 static BOOL SamReadEntry(WINPR_SAM* sam, WINPR_SAM_ENTRY* entry)
 {
+	BOOL rc = FALSE;
 	char* p[5];
 	size_t LmHashLength;
 	size_t NtHashLength;
 	size_t count = 0;
+	char* line;
 	char* cur;
 
 	if (!sam || !entry || !sam->line)
 		return FALSE;
 
-	cur = sam->line;
-
+	line = cur = _strdup(sam->line);
+	p[0] = cur;
 	while ((cur = strchr(cur, ':')) != NULL)
 	{
+		*cur++ = '\0';
 		count++;
-		cur++;
+		if (count < ARRAYSIZE(p))
+			p[count] = cur;
 	}
 
 	if (count < 4)
-		return FALSE;
+		goto fail;
 
-	p[0] = sam->line;
-	p[1] = strchr(p[0], ':') + 1;
-	p[2] = strchr(p[1], ':') + 1;
-	p[3] = strchr(p[2], ':') + 1;
-	p[4] = strchr(p[3], ':') + 1;
 	LmHashLength = (p[3] - p[2] - 1);
 	NtHashLength = (p[4] - p[3] - 1);
 
 	if ((LmHashLength != 0) && (LmHashLength != 32))
-		return FALSE;
+		goto fail;
 
 	if ((NtHashLength != 0) && (NtHashLength != 32))
-		return FALSE;
+		goto fail;
 
 	entry->UserLength = (UINT32)(p[1] - p[0] - 1);
 	entry->User = (LPSTR)malloc(entry->UserLength + 1);
 
 	if (!entry->User)
-		return FALSE;
+		goto fail;
 
 	entry->User[entry->UserLength] = '\0';
 	entry->DomainLength = (UINT32)(p[2] - p[1] - 1);
@@ -208,7 +207,7 @@ static BOOL SamReadEntry(WINPR_SAM* sam, WINPR_SAM_ENTRY* entry)
 		{
 			free(entry->User);
 			entry->User = NULL;
-			return FALSE;
+			goto fail;
 		}
 
 		memcpy(entry->Domain, p[1], entry->DomainLength);
@@ -223,7 +222,10 @@ static BOOL SamReadEntry(WINPR_SAM* sam, WINPR_SAM_ENTRY* entry)
 	if (NtHashLength == 32)
 		HexStrToBin(p[3], (BYTE*)entry->NtHash, 16);
 
-	return TRUE;
+	rc = TRUE;
+fail:
+	free(line);
+	return rc;
 }
 
 void SamFreeEntry(WINPR_SAM* sam, WINPR_SAM_ENTRY* entry)
